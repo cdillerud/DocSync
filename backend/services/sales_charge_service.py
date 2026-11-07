@@ -104,6 +104,12 @@ ITEM_MULTI_EVIDENCE = True
 # latest steady run (3+ orders) is the ratio. Berk TARIFF: 1 per order in
 # 2025, then TARIFF qty = J110CT qty on its last 5 lines.
 MULTI_CP_RATIO = True
+# An item's charge as of its latest orders: TARIFF started on imported items
+# in 2026 (29 of their 41 latest orders, 25% of the product's price), so the
+# all-history 90% test never fires. The item's latest RECENT_N orders decide,
+# and a steady charge price / product price share prices it.
+RECENT_ITEM_CHARGES = True
+RECENT_N = 5
 
 
 UNIT_EACH = True
@@ -194,6 +200,7 @@ async def learn(db) -> Dict[str, Any]:
     item_orders = Counter()                           # item -> orders
     item_charge = defaultdict(list)                   # (item, charge) -> [(seq, qty_kind, qty, price)]
     multi_orders = Counter()                          # item -> multi-product orders with it
+    item_hist = defaultdict(list)                     # item -> [(seq, {charge: (kind, qty, price, share)})]
     multi_has = Counter()                             # (item, charge) -> of those, charge possibly its
     cust_seqs = defaultdict(list)                     # cust -> order sequence numbers
     cp_orders = Counter()                             # (cust, product) -> orders
@@ -206,6 +213,27 @@ async def learn(db) -> Dict[str, Any]:
         prods = [l for l in ls if is_product(l["lineObjectNumber"]) and float(l.get("quantity") or 0) > 0]
         if not prods:
             continue
+        if RECENT_ITEM_CHARGES and not (ITEM_RULES_INVOICED_ONLY and o.get("status") == "open"):
+            by_it = defaultdict(list)
+            for l in prods:
+                by_it[str(l["lineObjectNumber"]).upper()].append(l)
+            qs_of = {i: {round(float(x["quantity"]), 6) for x in pl} for i, pl in by_it.items()}
+            for it_r, pls in by_it.items():
+                got = {}
+                for l in ls:
+                    c = str(l["lineObjectNumber"]).upper()
+                    if is_product(c) or float(l.get("quantity") or 0) <= 0:
+                        continue
+                    q = round(float(l["quantity"]), 6)
+                    owners = {i for i, qs in qs_of.items() if q in qs}
+                    if owners and it_r not in owners:
+                        continue
+                    kind = "same" if q in qs_of[it_r] else ("one" if q == 1 else "other")
+                    pr = float(l.get("unitPrice") or 0)
+                    base = float(pls[0].get("unitPrice") or 0)
+                    if c not in got or pr > got[c][2]:
+                        got[c] = (kind, q, pr, pr / base if base and kind == "same" else None)
+                item_hist[it_r].append((_order_seq(o.get("order_no")), got))
         if (ITEM_MULTI_EVIDENCE and len({str(l["lineObjectNumber"]).upper() for l in prods}) > 1
                 and not (ITEM_RULES_INVOICED_ONLY and o.get("status") == "open")):
             pq_of = defaultdict(set)
@@ -381,6 +409,26 @@ async def learn(db) -> Dict[str, Any]:
             if r:
                 product_rules.append({"scope": "item_charge", "product": it, "charge": c, "presence": round(pres, 3), "n": n_it,
                                       "qty_kind": "ratio", "ratio": r, "price": last[3]})
+    if RECENT_ITEM_CHARGES:
+        have_ic = {(r["product"], r["charge"]) for r in product_rules if r.get("scope") == "item_charge"}
+        for it, hist in item_hist.items():
+            if len(hist) < 3:
+                continue
+            last = sorted(hist, key=lambda h: h[0])[-RECENT_N:]
+            for c in set().union(*[set(h[1]) for h in last]):
+                if c in excluded or (it, c) in have_ic:
+                    continue
+                obs_r = [h[1][c] for h in last if c in h[1]]
+                pres = len(obs_r) / len(last)
+                if pres < 0.8 or len(obs_r) < 3:
+                    continue
+                kind, kk = Counter(t[0] for t in obs_r).most_common(1)[0]
+                if kind != "same" or kk / len(obs_r) < 0.8:
+                    continue          # order-level charges (freight, fuel) are not the item's
+                share = _steady([t[3] for t in obs_r if t[3]]) if kind == "same" else None
+                product_rules.append({"scope": "item_charge", "product": it, "charge": c, "presence": round(pres, 3),
+                                      "n": len(last), "qty_kind": kind, "price": obs_r[-1][2], "recent": True,
+                                      "price_share": share})
     for (sig, c), rs in size_ratio.items():
         r = _steady(rs)
         if r and len(rs) >= 5:
@@ -623,14 +671,25 @@ async def charge_lines(db, customer_no: str, product_lines: List[Dict[str, Any]]
             async for ic in db.sales_charge_product_rules.find({"scope": "item_charge", "product": str(p["item"]).upper()}, {"_id": 0}):
                 if ic["charge"] in have:
                     continue
+                if ic.get("recent"):
+                    cpv = await db.sales_charge_product_rules.find_one(
+                        {"scope": "cust_presence", "customer_no": customer_no, "product": str(p["item"]).upper(), "charge": ic["charge"]},
+                        {"_id": 0, "presence": 1})
+                    if cpv and cpv.get("presence", 1) <= 0.2:
+                        continue      # this customer's orders for it do not carry the charge
                 have.add(ic["charge"])
                 if ic["qty_kind"] == "ratio":
                     q = float(max(1, round(ic["ratio"] * _each(float(p.get("quantity") or 0), p.get("unit_of_measure")))))
                 else:
                     q = float(p.get("quantity") or 0) if ic["qty_kind"] == "same" else 1.0
-                out.append({"item": ic["charge"], "quantity": q, "unit_price": ic["price"], "charge": True,
-                            "how": f"on {int(ic['presence'] * 100)}% of this item's {ic['n']} BC orders",
-                            "price_source": "this item's latest price"})
+                price, src = ic["price"], "this item's latest price"
+                if ic.get("price_share") and float(p.get("unit_price") or 0) > 0:
+                    price = round(ic["price_share"] * float(p["unit_price"]), 4)
+                    src = f"{ic['price_share'] * 100:g}% of the product's price, as on this item's latest BC orders"
+                out.append({"item": ic["charge"], "quantity": q, "unit_price": price, "charge": True,
+                            "how": (f"on {int(ic['presence'] * 100)}% of this item's latest {ic['n']} BC orders" if ic.get("recent")
+                                    else f"on {int(ic['presence'] * 100)}% of this item's {ic['n']} BC orders"),
+                            "price_source": src})
     if DUNNAGE_BY_SIZE:
         # Dunnage comes with the container, whoever buys it: Ball 12oz cans
         # ship on Ball pallets / tier sheets / top frames on 80%+ of orders.

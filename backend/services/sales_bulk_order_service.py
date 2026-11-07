@@ -62,7 +62,13 @@ async def template(db, customer_no: str, item: str, before: Optional[str] = None
                for l in ls if l.get("lineType") == "Item" and l is not prod and l.get("lineObjectNumber")
                and str(l["lineObjectNumber"]).upper() not in later]
     charges_from = "template order"
-    if o.get("status") != "open":
+    entered = await _entered_charges(db, customer_no, item) if o.get("status") != "open" else None
+    if entered:
+        # No open order of this item: the charges this customer's open orders
+        # are entered with (Horseshoe 98 of 98: DUNNAGEMGMT 0 + FREIGHT 1970).
+        # The item's invoiced orders carry FRTSURCHARGE 220, added at invoicing.
+        charges, charges_from = entered["charges"], f"as entered on {entered['n']} of this customer's {entered['of']} open orders"
+    elif o.get("status") != "open":
         # An invoiced order carries what was added at invoicing (Horseshoe
         # FRTSURCHARGE 220 for the FREIGHT 1970 entered): use the charges
         # the Hub learned this customer's orders are entered with.
@@ -79,6 +85,48 @@ async def template(db, customer_no: str, item: str, before: Optional[str] = None
             "charges_from": charges_from,
             "unit_of_measure": prod.get("unitOfMeasureCode"), "quantity": float(prod.get("quantity") or 0),
             "charges": charges, "comments": comments}
+
+
+async def _entered_charges(db, customer_no: str, item: str) -> Optional[Dict[str, Any]]:
+    """The charge lines this customer's open (as entered) one-product orders
+    carry, when 80%+ of them (5+) carry the same set - for an item whose own
+    orders are all invoiced, and only when those invoiced orders end up with
+    the charges the open items' invoiced orders end up with (6074456:
+    DUNNAGEMGMT + WHSEFRT + FRTSURCHARGE, like 6069966; not the 6072005
+    ends, invoiced with WHSEFRT 1695 alone)."""
+    from services.sales_item_xref_service import is_product, _order_seq
+    sets, open_items = Counter(), set()
+    inv_sets = {}                                        # product -> [(seq, invoiced charge-item set)]
+
+    def split(o):
+        its = [l for l in _lines_of(o) if l.get("lineType") == "Item" and l.get("lineObjectNumber")]
+        prods = [l for l in its if is_product(str(l["lineObjectNumber"]))]
+        return (str(prods[0]["lineObjectNumber"]).upper() if len(prods) == 1 else None), [l for l in its if l not in prods]
+
+    async for o in db.bc_sales_orders.find({"customer_no": customer_no}, {"_id": 0, "order_no": 1, "status": 1, "lines": 1, "entered_lines": 1}):
+        p, ch = split(o)
+        if not p:
+            continue
+        if o.get("status") == "open":
+            open_items.add(p)
+            sets[tuple(sorted((str(l["lineObjectNumber"]).upper(), float(l.get("quantity") or 0), round(float(l.get("unitPrice") or 0), 4),
+                               l.get("unitOfMeasureCode") or None) for l in ch))] += 1
+        else:
+            inv_sets.setdefault(p, []).append((_order_seq(o.get("order_no")), frozenset(str(l["lineObjectNumber"]).upper() for l in ch)))
+    n_all = sum(sets.values())
+    if n_all < 5 or not inv_sets.get(item.upper()):
+        return None
+    # As of now: the item's latest invoiced order ends up with charges that
+    # 2+ of the latest 40 invoiced orders of the open items end up with
+    # (invoicing varies: FUELSUR or FRTSURCHARGE 220, WHSEFRT 1800-2550).
+    mine = max(inv_sets[item.upper()], key=lambda t: t[0])[1]
+    recent = sorted((t for p in open_items for t in inv_sets.get(p) or []), key=lambda t: t[0])[-40:]
+    if sum(1 for t in recent if t[1] == mine) < 2:
+        return None
+    top, n = sets.most_common(1)[0]
+    if n / n_all < 0.8:
+        return None
+    return {"n": n, "of": n_all, "charges": [{"item": it, "quantity": q, "unit_price": p, "unit_of_measure": u, "description": None} for it, q, p, u in top]}
 
 
 async def lead_days(db, customer_no: str) -> Optional[int]:

@@ -28,6 +28,11 @@ logger = logging.getLogger(__name__)
 _HEADER_COPY = ("shipToName", "shipToContact", "shipToAddressLine1", "shipToAddressLine2", "shipToCity", "shipToState",
                 "shipToCountry", "shipToPostCode", "shortcutDimension1Code", "shortcutDimension2Code", "paymentTermsId",
                 "shipmentMethodId", "currencyCode")
+# Set after the lines: BC fills these from the vendor card and the location
+# (Ball's Westminster address, contact "Receiving") as the PO is built; the
+# buyer's PO orders from the Pittston plant for Jennifer Schuman.
+_HEADER_AFTER = ("buyFromAddressLine1", "buyFromAddressLine2", "buyFromCity", "buyFromState", "buyFromCountry", "buyFromPostCode",
+                 "shipToContact", "purchaser")
 _W = re.compile(r"/\s*(W\d+)")
 
 
@@ -99,6 +104,7 @@ def _template_from(pos: List[Dict[str, Any]], item: str) -> Optional[Dict[str, A
     _, p, prod = best
     ls = p["purchaseOrderLines"]
     return {"po_no": p["number"], "order_date": p.get("orderDate"), "header": {k: p[k] for k in _HEADER_COPY if p.get(k) not in (None, "")},
+            "header_after": {k: p[k] for k in _HEADER_AFTER if p.get(k) not in (None, "")},
             "cost": float(prod.get("directUnitCost") or 0), "unit_of_measure": prod.get("unitOfMeasureCode") or None,
             "location_id": prod.get("locationId"),
             "comments": [str(l.get("description") or "") for l in ls if l.get("lineType") == "Comment" and str(l.get("description") or "").strip()],
@@ -224,8 +230,14 @@ async def create(db, doc_id: str, costs: Dict[str, float], user: Optional[Dict[s
                     pr = await _set_cost(c, base, h, pid, lr.json(), body["directUnitCost"])
                     if pr:
                         errors.append(f"{body['lineObjectNumber']} cost: {pr}")
+            if t.get("header_after"):
+                hr = await c.patch(f"{base}/purchaseOrders({pid})", headers={**h, "If-Match": "*"}, json=t["header_after"])
+                if hr.status_code >= 300:
+                    errors.append(f"header: {hr.text[:160]}")
             rb = await c.get(f"{base}/purchaseOrders({pid})", headers=h, params={"$expand": "purchaseOrderLines"})
             got = [x for x in (rb.json().get("purchaseOrderLines") or []) if x.get("lineObjectNumber")] if rb.status_code == 200 else []
+            if rb.status_code == 200 and any(rb.json().get(k) != v for k, v in (t.get("header_after") or {}).items()):
+                errors.append("header differs on read back")
             want = [b for b in lines if b["lineType"] == "Item"]
             ok = not errors and len(got) == len(want) and all(
                 any(str(g["lineObjectNumber"]).upper() == str(b["lineObjectNumber"]).upper() and abs(float(g["quantity"]) - b["quantity"]) < 0.001
